@@ -29,7 +29,6 @@ android {
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib-common:2.2.20")
     implementation("com.ciscowebex:webexsdk:3.16.3") {
         exclude(group = "androidx.lifecycle")
     }

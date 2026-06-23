@@ -60,16 +60,33 @@ val webexCallingPluginPath = readWebexCallingPluginPath(file(".."))
 include(":webex_calling_sdk")
 project(":webex_calling_sdk").projectDir =
     webexCallingPluginPath.resolve("android/webex_calling_sdk")
+
+// On-demand Webex SDK (App Bundle + Play installs only).
+val useDynamicDelivery =
+    gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+if (useDynamicDelivery) {
+    include(":webex_calling_feature")
+    project(":webex_calling_feature").projectDir =
+        webexCallingPluginPath.resolve("android/webex_calling_feature")
+}
 ```
 
-### 3. App module dependencies
+### 3. App module (Play on-demand delivery)
 
 In `android/app/build.gradle.kts`:
 
 ```kotlin
-defaultConfig {
-    minSdk = maxOf(flutter.minSdkVersion, 28)
-    ndk { abiFilters += listOf("arm64-v8a") }
+val useDynamicDelivery =
+    gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+
+android {
+    defaultConfig {
+        minSdk = maxOf(flutter.minSdkVersion, 28)
+        ndk { abiFilters += listOf("arm64-v8a") }
+    }
+    if (useDynamicDelivery) {
+        dynamicFeatures += setOf(":webex_calling_feature")
+    }
 }
 
 dependencies {
@@ -77,7 +94,13 @@ dependencies {
     implementation("androidx.emoji2:emoji2:1.5.0")
     implementation("androidx.lifecycle:lifecycle-runtime:2.8.7")
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
-    implementation(project(":webex_calling_sdk"))
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-common:2.2.20")
+
+    // Embed SDK for flutter run / APK sideloads; on-demand module for App Bundle.
+    if (!useDynamicDelivery) {
+        implementation(project(":webex_calling_sdk"))
+    }
 }
 ```
 
@@ -97,6 +120,28 @@ Add permissions to `android/app/src/main/AndroidManifest.xml` (see plugin manife
 ### Permissions (SDK 3.16+)
 
 Your app must request runtime permissions before dial/join. See [Android Meetings SDK integration](https://developer.webex.com/meeting/docs/sdks/android-meetings-sdk-integrating-the-sdk).
+
+## On-demand download (Play Store)
+
+When you ship an **App Bundle** via Google Play, the Webex SDK (~200 MB) is in an **on-demand dynamic feature**. The base install stays smaller; users download Webex when your app calls:
+
+```dart
+await WebexCalling.instance.ensureModuleInstalled(
+  onProgress: (state) => print('${state.status} ${state.progress}'),
+);
+```
+
+| Install source | On-demand download |
+|----------------|-------------------|
+| Google Play (AAB) | Yes — `ensureModuleInstalled()` |
+| APK sideload / `flutter run` | No — SDK embedded in base APK |
+
+Build commands:
+
+```bash
+flutter build appbundle --release   # Play: on-demand module
+flutter build apk --release         # Sideload: full SDK in APK
+```
 
 ## Host app setup (iOS)
 
