@@ -1,0 +1,28 @@
+name: webex_calling
+description: Flutter plugin for Webex using the Full SDK with Android on-demand delivery.
+version: 0.1.0
+homepage: https://github.com/YOUR_GITHUB_USERNAME/webex_calling
+repository: https://github.com/YOUR_GITHUB_USERNAME/webex_calling
+
+environment:
+  sdk: ^3.11.4
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.1.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.webex.flutter.calling
+        pluginClass: WebexCallingPlugin
+      ios:
+        pluginClass: WebexCallingPlugin
