@@ -17,7 +17,10 @@ android {
 
     packaging {
         resources {
-            excludes += "META-INF/*.version"
+            excludes += setOf(
+                "META-INF/*.version",
+                "res/xml/sdk_file_paths.xml",
+            )
         }
     }
 }
