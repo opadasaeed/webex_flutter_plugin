@@ -70,20 +70,23 @@ public class WebexCallingPlugin: NSObject, FlutterPlugin {
 
       webex = Webex(authenticator: authenticator)
       webex?.ucLoginDelegate = self
-      webex?.initialize { [weak self] success in
-        guard success else {
-          result(
-            FlutterError(
-              code: "INIT_FAILED",
-              message: "Webex SDK initialization failed.",
-              details: nil
-            )
-          )
+      webex?.initialize { [weak self] isLoggedIn in
+        guard let self else { return }
+
+        // Webex returns whether the user is already authenticated, not init success.
+        if isLoggedIn {
+          result(true)
           return
         }
 
-        guard let parent = self?.topViewController() else {
-          result(true)
+        guard let parent = self.topViewController() else {
+          result(
+            FlutterError(
+              code: "NO_VIEW_CONTROLLER",
+              message: "Unable to present Webex login screen.",
+              details: nil
+            )
+          )
           return
         }
 
