@@ -151,6 +151,25 @@ platform :ios, '15.0'
 
 The plugin depends on `WebexSDK` (~> 3.16.0), not `WebexSDK/Wxc`.
 
+### App Group (required — crash without it)
+
+Webex SDK requires an App Group for local storage and screen sharing. In your host app:
+
+1. **Apple Developer** → App ID `com.worldofss.tallam` → enable **App Groups** → create `group.com.worldofss.tallam`
+2. **Runner/Info.plist** — add:
+
+```xml
+<key>GroupIdentifier</key>
+<string>group.com.worldofss.tallam</string>
+```
+
+3. **Runner/Runner.entitlements** — add the same group under `com.apple.security.application-groups`
+4. Set `CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements` in Xcode for the Runner target
+
+See [Webex iOS — Setting App Group](https://github.com/webex/webex-ios-sdk/wiki/Setting-App-Group).
+
+For **broadcast screen share**, you also need a Broadcast Upload Extension with the same `GroupIdentifier`.
+
 ## Dart usage
 
 ```dart

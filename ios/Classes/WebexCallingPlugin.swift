@@ -166,34 +166,68 @@ public class WebexCallingPlugin: NSObject, FlutterPlugin {
         return
       }
 
-      let audioOnly = args["audioOnly"] as? Bool ?? true
-      let mediaOption =
-        audioOnly
-        ? MediaOption.audioOnly()
-        : MediaOption.audioVideo(local: nil, remote: nil)
+      let audioOnly = args["audioOnly"] as? Bool ?? false
 
-      webex?.phone.dial(address, option: mediaOption) { [weak self] dialResult in
-        switch dialResult {
-        case .success(let call):
-          self?.activeCall = call
-          call.onConnected = { [weak self] in
-            self?.emit(type: "connected", callId: call.callId)
-          }
-          call.onDisconnected = { [weak self] reason in
-            self?.emit(type: "disconnected", callId: call.callId, reason: String(describing: reason))
-            if self?.activeCall?.callId == call.callId {
-              self?.activeCall = nil
-            }
-          }
-          result(call.callId)
-        case .failure(let error):
-          result(
-            FlutterError(
-              code: "JOIN_FAILED",
-              message: error.localizedDescription,
-              details: nil
-            )
+      guard let webex = webex else {
+        result(
+          FlutterError(
+            code: "NOT_INITIALIZED",
+            message: "Webex is not initialized. Call initialize() first.",
+            details: nil
           )
+        )
+        return
+      }
+
+      guard let parent = topViewController() else {
+        result(
+          FlutterError(
+            code: "NO_VIEW_CONTROLLER",
+            message: "Unable to present the meeting screen.",
+            details: nil
+          )
+        )
+        return
+      }
+
+      let meetingVC = WebexMeetingViewController()
+      meetingVC.modalPresentationStyle = .fullScreen
+      meetingVC.meetingTitle = address
+      meetingVC.isAudioOnly = audioOnly
+
+      parent.present(meetingVC, animated: true) { [weak self] in
+        guard let self = self else { return }
+        let mediaOption =
+          audioOnly
+          ? MediaOption.audioOnly()
+          : MediaOption.audioVideo(local: meetingVC.selfVideoView, remote: meetingVC.remoteVideoView)
+
+        webex.phone.dial(address, option: mediaOption) { [weak self] dialResult in
+          switch dialResult {
+          case .success(let call):
+            self?.activeCall = call
+            meetingVC.onConnectedHook = { [weak self] in
+              self?.emit(type: "connected", callId: call.callId)
+            }
+            meetingVC.onEndedHook = { [weak self] callId in
+              self?.emit(type: "disconnected", callId: callId)
+              if self?.activeCall?.callId == callId {
+                self?.activeCall = nil
+              }
+            }
+            meetingVC.attach(call: call)
+            result(call.callId)
+          case .failure(let error):
+            meetingVC.handleDialFailed(error.localizedDescription)
+            meetingVC.dismiss(animated: true)
+            result(
+              FlutterError(
+                code: "JOIN_FAILED",
+                message: error.localizedDescription,
+                details: nil
+              )
+            )
+          }
         }
       }
     case "hangup":

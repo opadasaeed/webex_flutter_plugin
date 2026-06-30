@@ -6,13 +6,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
-import android.widget.Button
+import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.ciscowebex.androidsdk.CompletionHandler
 import com.ciscowebex.androidsdk.phone.Call
+import com.ciscowebex.androidsdk.phone.CallMembership
 import com.ciscowebex.androidsdk.phone.CallObserver
 import com.ciscowebex.androidsdk.phone.MediaOption
 import com.ciscowebex.androidsdk.phone.MediaRenderView
@@ -21,26 +26,43 @@ import com.ciscowebex.androidsdk.phone.Phone
 class WebexCallActivity : Activity() {
     private lateinit var remoteView: MediaRenderView
     private lateinit var localView: MediaRenderView
+    private lateinit var selfViewFrame: View
+    private lateinit var voiceInfoContainer: View
+    private lateinit var voiceTitleText: TextView
     private lateinit var titleText: TextView
     private lateinit var statusText: TextView
-    private lateinit var muteButton: Button
-    private lateinit var hangupButton: Button
+
+    private lateinit var muteButton: ImageButton
+    private lateinit var cameraButton: ImageButton
+    private lateinit var switchCameraButton: ImageButton
+    private lateinit var participantsButton: ImageButton
+    private lateinit var chatButton: ImageButton
+    private lateinit var hangupButton: ImageButton
+
+    private lateinit var participantsPanel: View
+    private lateinit var participantsTitle: TextView
+    private lateinit var participantsContainer: LinearLayout
+    private lateinit var participantsCloseButton: ImageButton
+
+    private lateinit var chatPanel: View
+    private lateinit var chatScroll: ScrollView
+    private lateinit var chatMessagesContainer: LinearLayout
+    private lateinit var chatInput: EditText
+    private lateinit var chatSendButton: ImageButton
+    private lateinit var chatCloseButton: ImageButton
 
     private var activeCall: Call? = null
     private var isMuted = false
+    private var isCameraOn = true
     private var completionSent = false
     private var pendingCall: WebexCallingEngine.PendingCall? = null
+    private val chatTransport: ChatTransport = LocalEchoChatTransport()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_webex_call)
 
-        remoteView = findViewById(R.id.remoteView)
-        localView = findViewById(R.id.localView)
-        titleText = findViewById(R.id.titleText)
-        statusText = findViewById(R.id.statusText)
-        muteButton = findViewById(R.id.muteButton)
-        hangupButton = findViewById(R.id.hangupButton)
+        bindViews()
 
         pendingCall =
             WebexCallingEngine.peekPendingCall()
@@ -49,30 +71,78 @@ class WebexCallActivity : Activity() {
                     return
                 }
 
-        titleText.text = pendingCall!!.displayTitle
+        val pending = pendingCall!!
+        isCameraOn = !pending.audioOnly
+        titleText.text = pending.displayTitle
+        voiceTitleText.text = pending.displayTitle
         statusText.text = "Connecting..."
 
-        muteButton.setOnClickListener {
-            val call = activeCall ?: return@setOnClickListener
-            isMuted = !isMuted
-            call.setSendingAudio(!isMuted)
-            muteButton.text = if (isMuted) "Unmute" else "Mute"
-        }
+        configureControlsForMode(pending.audioOnly)
+        wireListeners()
+        startChat(pending)
 
+        if (hasRequiredPermissions(pending.audioOnly)) {
+            startCall(pending)
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                missingPermissions(pending.audioOnly),
+                CAMERA_PERMISSION_REQUEST_CODE,
+            )
+        }
+    }
+
+    private fun bindViews() {
+        remoteView = findViewById(R.id.remoteView)
+        localView = findViewById(R.id.localView)
+        selfViewFrame = findViewById(R.id.selfViewFrame)
+        voiceInfoContainer = findViewById(R.id.voiceInfoContainer)
+        voiceTitleText = findViewById(R.id.voiceTitleText)
+        titleText = findViewById(R.id.titleText)
+        statusText = findViewById(R.id.statusText)
+
+        muteButton = findViewById(R.id.muteButton)
+        cameraButton = findViewById(R.id.cameraButton)
+        switchCameraButton = findViewById(R.id.switchCameraButton)
+        participantsButton = findViewById(R.id.participantsButton)
+        chatButton = findViewById(R.id.chatButton)
+        hangupButton = findViewById(R.id.hangupButton)
+
+        participantsPanel = findViewById(R.id.participantsPanel)
+        participantsTitle = findViewById(R.id.participantsTitle)
+        participantsContainer = findViewById(R.id.participantsContainer)
+        participantsCloseButton = findViewById(R.id.participantsCloseButton)
+
+        chatPanel = findViewById(R.id.chatPanel)
+        chatScroll = findViewById(R.id.chatScroll)
+        chatMessagesContainer = findViewById(R.id.chatMessagesContainer)
+        chatInput = findViewById(R.id.chatInput)
+        chatSendButton = findViewById(R.id.chatSendButton)
+        chatCloseButton = findViewById(R.id.chatCloseButton)
+    }
+
+    private fun configureControlsForMode(audioOnly: Boolean) {
+        val videoVisibility = if (audioOnly) View.GONE else View.VISIBLE
+        cameraButton.visibility = videoVisibility
+        switchCameraButton.visibility = videoVisibility
+        voiceInfoContainer.visibility = if (audioOnly) View.VISIBLE else View.GONE
+    }
+
+    private fun wireListeners() {
+        muteButton.setOnClickListener { toggleMute() }
+        cameraButton.setOnClickListener { toggleCamera() }
+        switchCameraButton.setOnClickListener { switchCamera() }
+        participantsButton.setOnClickListener { toggleParticipants() }
+        chatButton.setOnClickListener { toggleChat() }
         hangupButton.setOnClickListener {
             activeCall?.hangup(CompletionHandler { })
             finish()
         }
-
-        if (hasRequiredPermissions(pendingCall!!.audioOnly)) {
-            startCall(pendingCall!!)
-        } else {
-            ActivityCompat.requestPermissions(
-                this,
-                missingPermissions(pendingCall!!.audioOnly),
-                CAMERA_PERMISSION_REQUEST_CODE,
-            )
+        participantsCloseButton.setOnClickListener {
+            participantsPanel.visibility = View.GONE
         }
+        chatCloseButton.setOnClickListener { chatPanel.visibility = View.GONE }
+        chatSendButton.setOnClickListener { sendChat() }
     }
 
     override fun onRequestPermissionsResult(
@@ -101,6 +171,7 @@ class WebexCallActivity : Activity() {
     }
 
     override fun onDestroy() {
+        chatTransport.stop()
         if (!isFinishing && activeCall != null) {
             activeCall?.hangup(CompletionHandler { })
         }
@@ -125,7 +196,7 @@ class WebexCallActivity : Activity() {
                 MediaOption.audioOnly()
             } else {
                 remoteView.visibility = View.VISIBLE
-                localView.visibility = View.VISIBLE
+                selfViewFrame.visibility = View.VISIBLE
                 MediaOption.audioVideo(localView, remoteView)
             }
 
@@ -169,14 +240,13 @@ class WebexCallActivity : Activity() {
                     runOnUiThread {
                         statusText.text = "Connected"
                         completeOnce(pending, Result.success(call?.getCallId()))
+                        refreshRoster()
                     }
                 }
 
                 override fun onRinging(call: Call?) {
                     super.onRinging(call)
-                    runOnUiThread {
-                        statusText.text = "Ringing..."
-                    }
+                    runOnUiThread { statusText.text = "Ringing..." }
                 }
 
                 override fun onWaiting(
@@ -184,9 +254,19 @@ class WebexCallActivity : Activity() {
                     reason: Call.WaitReason?,
                 ) {
                     super.onWaiting(call, reason)
-                    runOnUiThread {
-                        statusText.text = reason?.name ?: "Waiting..."
-                    }
+                    runOnUiThread { statusText.text = reason?.name ?: "Waiting..." }
+                }
+
+                override fun onMediaChanged(event: CallObserver.MediaChangedEvent?) {
+                    super.onMediaChanged(event)
+                    runOnUiThread { refreshRoster() }
+                }
+
+                override fun onCallMembershipChanged(
+                    event: CallObserver.CallMembershipChangedEvent?,
+                ) {
+                    super.onCallMembershipChanged(event)
+                    runOnUiThread { refreshRoster() }
                 }
 
                 override fun onDisconnected(event: CallObserver.CallDisconnectedEvent?) {
@@ -196,6 +276,151 @@ class WebexCallActivity : Activity() {
             },
         )
     }
+
+    private fun toggleMute() {
+        val call = activeCall ?: return
+        isMuted = !isMuted
+        call.setSendingAudio(!isMuted)
+        muteButton.setImageResource(if (isMuted) R.drawable.ic_mic_off else R.drawable.ic_mic)
+        muteButton.setBackgroundResource(
+            if (isMuted) R.drawable.bg_circle_primary else R.drawable.bg_circle_control,
+        )
+    }
+
+    private fun toggleCamera() {
+        val call = activeCall ?: return
+        isCameraOn = !isCameraOn
+        call.setSendingVideo(isCameraOn)
+        selfViewFrame.visibility = if (isCameraOn) View.VISIBLE else View.GONE
+        cameraButton.setImageResource(
+            if (isCameraOn) R.drawable.ic_videocam else R.drawable.ic_videocam_off,
+        )
+        cameraButton.setBackgroundResource(
+            if (isCameraOn) R.drawable.bg_circle_control else R.drawable.bg_circle_primary,
+        )
+    }
+
+    private fun switchCamera() {
+        val call = activeCall ?: return
+        val next =
+            if (call.getFacingMode() == Phone.FacingMode.USER) {
+                Phone.FacingMode.ENVIROMENT
+            } else {
+                Phone.FacingMode.USER
+            }
+        call.setFacingMode(next)
+    }
+
+    private fun toggleParticipants() {
+        val show = participantsPanel.visibility != View.VISIBLE
+        participantsPanel.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) {
+            chatPanel.visibility = View.GONE
+            refreshRoster()
+        }
+    }
+
+    private fun toggleChat() {
+        val show = chatPanel.visibility != View.VISIBLE
+        chatPanel.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) {
+            participantsPanel.visibility = View.GONE
+        }
+    }
+
+    private fun refreshRoster() {
+        val memberships = activeCall?.getMemberships() ?: emptyList()
+        participantsContainer.removeAllViews()
+        participantsTitle.text = "Participants (${memberships.size})"
+
+        if (memberships.isEmpty()) {
+            participantsContainer.addView(
+                makeTextView(
+                    "No participants yet.",
+                    0xFF9AA3AE.toInt(),
+                    13f,
+                ),
+            )
+            return
+        }
+
+        for (membership in memberships) {
+            participantsContainer.addView(buildParticipantRow(membership))
+        }
+    }
+
+    private fun buildParticipantRow(membership: CallMembership): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.VERTICAL
+        val pad = dp(10)
+        row.setPadding(pad, pad, pad, pad)
+
+        val displayName = membership.getDisplayName()?.takeIf { it.isNotBlank() } ?: "Participant"
+        val nameColor = if (membership.isActiveSpeaker()) 0xFF0ACEAE.toInt() else 0xFFFFFFFF.toInt()
+        row.addView(makeTextView(displayName, nameColor, 15f))
+
+        val mic = if (membership.isSendingAudio()) "Mic on" else "Mic off"
+        val cam = if (membership.isSendingVideo()) "Cam on" else "Cam off"
+        val state = membership.getState()?.name ?: ""
+        row.addView(makeTextView("$mic  -  $cam  -  $state", 0xFF9AA3AE.toInt(), 12f))
+
+        return row
+    }
+
+    private fun startChat(pending: WebexCallingEngine.PendingCall) {
+        chatTransport.start(pending.address) { sender, text, fromMe ->
+            runOnUiThread { appendChatMessage(sender, text, fromMe) }
+        }
+    }
+
+    private fun sendChat() {
+        val text = chatInput.text?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) {
+            return
+        }
+        chatInput.setText("")
+        chatTransport.send(text)
+    }
+
+    private fun appendChatMessage(
+        sender: String,
+        text: String,
+        fromMe: Boolean,
+    ) {
+        val bubble = TextView(this)
+        bubble.text = "$sender: $text"
+        bubble.setTextColor(0xFFFFFFFF.toInt())
+        bubble.textSize = 14f
+        val pad = dp(8)
+        bubble.setPadding(pad, pad, pad, pad)
+        bubble.setBackgroundColor(if (fromMe) 0xFF2644BC.toInt() else 0xFF1B2233.toInt())
+
+        val params =
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+        params.topMargin = dp(4)
+        params.gravity = if (fromMe) Gravity.END else Gravity.START
+        bubble.layoutParams = params
+
+        chatMessagesContainer.addView(bubble)
+        chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun makeTextView(
+        text: String,
+        color: Int,
+        size: Float,
+    ): TextView {
+        val view = TextView(this)
+        view.text = text
+        view.setTextColor(color)
+        view.textSize = size
+        return view
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun completeOnce(
         pending: WebexCallingEngine.PendingCall,
